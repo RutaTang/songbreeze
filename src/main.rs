@@ -21,6 +21,57 @@ enum InputEvent<I> {
     Tick,
 }
 
+struct AppState {
+    tab_titles: Vec<String>,
+    selected_tab_idx: Option<usize>,
+}
+impl AppState {
+    fn new() -> AppState {
+        AppState {
+            tab_titles: vec![],
+            selected_tab_idx: None,
+        }
+    }
+}
+impl AppState {
+    fn set_tab_titles(&mut self, tab_titles: Vec<String>) {
+        assert!(!tab_titles.is_empty());
+        self.tab_titles = tab_titles;
+        self.selected_tab_idx = Some(0);
+    }
+    fn cloned_tab_titles(&self) -> Vec<String> {
+        self.tab_titles.clone()
+    }
+    fn set_selected_tab_idx(&mut self, selected_tab_idx: usize) {
+        if selected_tab_idx >= self.tab_titles.len() {
+            self.selected_tab_idx = None;
+        } else {
+            self.selected_tab_idx = Some(selected_tab_idx);
+        }
+    }
+    fn get_selected_tab_idx(&self) -> Option<usize> {
+        self.selected_tab_idx
+    }
+    fn go_previous_tab(&mut self) {
+        if let Some(selected_tab_idx) = self.selected_tab_idx {
+            if selected_tab_idx > 0 {
+                self.selected_tab_idx = Some(selected_tab_idx - 1);
+            } else {
+                self.selected_tab_idx = (self.tab_titles.len() - 1).into();
+            }
+        }
+    }
+    fn go_next_tab(&mut self) {
+        if let Some(selected_tab_idx) = self.selected_tab_idx {
+            if selected_tab_idx < self.tab_titles.len() - 1 {
+                self.selected_tab_idx = Some(selected_tab_idx + 1);
+            } else {
+                self.selected_tab_idx = Some(0);
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), io::Error> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -45,6 +96,12 @@ fn main() -> Result<(), io::Error> {
         }
     });
 
+    let mut app_state = AppState::new();
+    app_state.set_tab_titles(vec![
+        "Home".to_string(),
+        "Sources".to_string(),
+        "Settings".to_string(),
+    ]);
     loop {
         let input_event = rx.recv().unwrap();
         match input_event {
@@ -53,12 +110,24 @@ fn main() -> Result<(), io::Error> {
                     code: KeyCode::Char('q'),
                     modifiers: KeyModifiers::CONTROL,
                 } => break,
+                KeyEvent {
+                    code: KeyCode::Char('h'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    app_state.go_previous_tab();
+                }
+                KeyEvent {
+                    code: KeyCode::Char('l'),
+                    modifiers: KeyModifiers::NONE,
+                } => {
+                    app_state.go_next_tab();
+                }
                 _ => {}
             },
             InputEvent::Tick => {}
         }
 
-        //todo: tabs state
+        //todo:  show different ui according to tab_idx
         terminal.draw(|f| {
             let boards = Layout::default()
                 .direction(Direction::Vertical)
@@ -74,9 +143,13 @@ fn main() -> Result<(), io::Error> {
             let tabs_board = boards[0];
 
             // draw tabs block and tabs content
+            let tab_titles = app_state.cloned_tab_titles();
+            let selected_tab_idx = app_state.get_selected_tab_idx().unwrap_or(0);
+
             let tabs_block = Block::default().borders(Borders::ALL).title("Menu");
             f.render_widget(tabs_block, tabs_board);
-            let titles: Vec<Spans> = ["Home", "Sources", "Setting"]
+            let titles: Vec<Spans> = app_state
+                .cloned_tab_titles()
                 .iter()
                 .cloned()
                 .map(Spans::from)
@@ -84,13 +157,17 @@ fn main() -> Result<(), io::Error> {
             let tabs_content = Tabs::new(titles)
                 .style(Style::default().fg(Color::White))
                 .highlight_style(Style::default().fg(Color::Yellow))
+                .select(selected_tab_idx)
                 .divider(DOT);
-            let tabs_content_board = Layout::default().constraints([Constraint::Percentage(100)]).horizontal_margin(5).split(tabs_board)[0];
+            let tabs_content_board = Layout::default()
+                .constraints([Constraint::Percentage(100)])
+                .horizontal_margin(5)
+                .split(tabs_board)[0];
             let tabs_content_board = Rect::new(
                 tabs_content_board.left(),
                 tabs_content_board.bottom() / 2,
                 tabs_content_board.width,
-                tabs_content_board.height-(tabs_content_board.bottom() / 2),
+                tabs_content_board.height - (tabs_content_board.bottom() / 2),
             );
             f.render_widget(tabs_content, tabs_content_board);
         })?;
