@@ -7,11 +7,11 @@ use crossterm::{
 };
 use tui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Margin, Rect},
-    style::{Color, Style},
+    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
+    style::{Color, Modifier, Style},
     symbols::DOT,
-    text::Spans,
-    widgets::{Block, Borders, Paragraph, Tabs},
+    text::{Span, Spans},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Tabs, Wrap},
     Terminal,
 };
 
@@ -127,7 +127,7 @@ fn main() -> Result<(), io::Error> {
             InputEvent::Tick => {}
         }
 
-        //todo: draw sources board
+        //todo: draw sources board - source lists
         terminal.draw(|f| {
             let boards = Layout::default()
                 .direction(Direction::Vertical)
@@ -167,14 +167,38 @@ fn main() -> Result<(), io::Error> {
 
             // draw main block and main content corresponde to selected tab
             match selected_tab_idx {
+                //Home
                 0 => {
                     let main_block = Block::default().borders(Borders::ALL).title("Home");
                     f.render_widget(main_block, main_board);
                 }
+                //Source
                 1 => {
+                    let main_boards = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints(
+                            [Constraint::Percentage(98), Constraint::Percentage(2)].as_ref(),
+                        )
+                        .split(main_board);
+                    let main_board = main_boards[0];
+                    let helper_board = main_boards[1];
+
+                    //main board
                     let main_block = Block::default().borders(Borders::ALL).title("Sources");
                     f.render_widget(main_block, main_board);
+
+                    //helper board
+                    let text = Spans::from(vec![
+                        Span::styled("(a) Add new source", Style::default().fg(Color::Magenta)),
+                        Span::raw(" ".repeat(10)),
+                        Span::styled("(d) Delete source", Style::default().fg(Color::Red)),
+                    ]);
+                    let helper_content = Paragraph::new(text)
+                        .alignment(Alignment::Center)
+                        .wrap(Wrap { trim: true });
+                    f.render_widget(helper_content, helper_board);
                 }
+                //Settings
                 2 => {
                     let main_block = Block::default().borders(Borders::ALL).title("Settings");
                     f.render_widget(main_block, main_board);
