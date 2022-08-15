@@ -11,7 +11,7 @@ use tui::{
     style::{Color, Modifier, Style},
     symbols::DOT,
     text::{Span, Spans},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Terminal,
 };
 
@@ -19,6 +19,29 @@ use tui::{
 enum InputEvent<I> {
     Input(I),
     Tick,
+}
+
+struct SourceTabState {
+    sources: Vec<String>,
+    sources_list_state: ListState,
+}
+
+impl SourceTabState {
+    fn new() -> Self {
+        Self {
+            sources: vec![],
+            sources_list_state: ListState::default(),
+        }
+    }
+}
+impl SourceTabState {
+    fn set_sources(&mut self, sources: Vec<String>) {
+        self.sources = sources;
+        self.sources_list_state.select(Some(0));
+    }
+    fn cloned_sources(&self) -> Vec<String> {
+        self.sources.clone()
+    }
 }
 
 struct AppState {
@@ -102,6 +125,12 @@ fn main() -> Result<(), io::Error> {
         "Sources".to_string(),
         "Settings".to_string(),
     ]);
+    let mut source_tab_state = SourceTabState::new();
+    source_tab_state.set_sources(vec![
+        "~/music".to_string(),
+        "~/google_drive/".to_string(),
+        "~/dropbox".to_string(),
+    ]);
     loop {
         let input_event = rx.recv().unwrap();
         match input_event {
@@ -127,7 +156,7 @@ fn main() -> Result<(), io::Error> {
             InputEvent::Tick => {}
         }
 
-        //todo: draw sources board - source lists
+        //todo: enable move between boards
         terminal.draw(|f| {
             let boards = Layout::default()
                 .direction(Direction::Vertical)
@@ -185,7 +214,17 @@ fn main() -> Result<(), io::Error> {
 
                     //main board
                     let main_block = Block::default().borders(Borders::ALL).title("Sources");
-                    f.render_widget(main_block, main_board);
+                    let sources = source_tab_state.cloned_sources();
+                    let list_items: Vec<ListItem> = sources
+                        .iter()
+                        .map(|s| ListItem::new(s.clone()).style(Style::default().fg(Color::White)))
+                        .collect();
+                    let main_content = List::new(list_items).block(main_block).highlight_style(Style::default().fg(Color::Yellow));
+                    f.render_stateful_widget(
+                        main_content,
+                        main_board,
+                        &mut source_tab_state.sources_list_state,
+                    );
 
                     //helper board
                     let text = Spans::from(vec![
