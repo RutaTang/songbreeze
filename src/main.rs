@@ -127,20 +127,14 @@ fn main() -> Result<(), io::Error> {
             InputEvent::Tick => {}
         }
 
-        //todo:  show different ui according to tab_idx
+        //todo: draw sources board
         terminal.draw(|f| {
             let boards = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(
-                    [
-                        Constraint::Percentage(10),
-                        Constraint::Percentage(50),
-                        Constraint::Percentage(40),
-                    ]
-                    .as_ref(),
-                )
+                .constraints([Constraint::Percentage(10), Constraint::Percentage(90)].as_ref())
                 .split(f.size());
             let tabs_board = boards[0];
+            let main_board = boards[1];
 
             // draw tabs block and tabs content
             let tab_titles = app_state.cloned_tab_titles();
@@ -170,6 +164,23 @@ fn main() -> Result<(), io::Error> {
                 tabs_content_board.height - (tabs_content_board.bottom() / 2),
             );
             f.render_widget(tabs_content, tabs_content_board);
+
+            // draw main block and main content corresponde to selected tab
+            match selected_tab_idx {
+                0 => {
+                    let main_block = Block::default().borders(Borders::ALL).title("Home");
+                    f.render_widget(main_block, main_board);
+                }
+                1 => {
+                    let main_block = Block::default().borders(Borders::ALL).title("Sources");
+                    f.render_widget(main_block, main_board);
+                }
+                2 => {
+                    let main_block = Block::default().borders(Borders::ALL).title("Settings");
+                    f.render_widget(main_block, main_board);
+                }
+                _ => {}
+            }
         })?;
     }
     Ok(())
