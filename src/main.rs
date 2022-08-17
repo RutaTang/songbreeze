@@ -236,6 +236,8 @@ fn main() -> Result<(), io::Error> {
                         modifiers: KeyModifiers::NONE,
                     } => {
                         // todo: handle input stream before clear
+                        // todo: hide/show pop up
+                        // todo: show cursor, and support move cursor and delete items
                         app_state.input_stream.clear();
                         app_state.switch_mode_to_normal();
                     }
