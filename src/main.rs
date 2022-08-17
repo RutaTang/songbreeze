@@ -10,7 +10,7 @@ use tui::{
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     symbols::DOT,
-    text::{Span, Spans},
+    text::{Span, Spans, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Terminal,
 };
@@ -21,11 +21,14 @@ enum InputEvent<I> {
     Tick,
 }
 
+// settings tab state
+struct SettingsState {}
+
+// source tab state
 struct SourceTabState {
     sources: Vec<String>,
     sources_list_state: ListState,
 }
-
 impl SourceTabState {
     fn new() -> Self {
         Self {
@@ -42,17 +45,42 @@ impl SourceTabState {
     fn cloned_sources(&self) -> Vec<String> {
         self.sources.clone()
     }
+    fn select_next(&mut self) {
+        let current_idx = self.sources_list_state.selected().unwrap();
+        if current_idx + 1 < self.sources.len() {
+            self.sources_list_state.select(Some(current_idx + 1));
+        } else {
+            self.sources_list_state.select(Some(0));
+        }
+    }
+    fn select_previous(&mut self) {
+        let current_idx = self.sources_list_state.selected().unwrap();
+        if current_idx > 0 {
+            self.sources_list_state.select(Some(current_idx - 1));
+        } else {
+            self.sources_list_state.select(Some(self.sources.len() - 1));
+        }
+    }
 }
 
+enum InputMode {
+    Normal,
+    Edit,
+}
+// app global state
 struct AppState {
     tab_titles: Vec<String>,
     selected_tab_idx: Option<usize>,
+    input_mode: InputMode,
+    input_stream: Vec<String>,
 }
 impl AppState {
     fn new() -> AppState {
         AppState {
             tab_titles: vec![],
             selected_tab_idx: None,
+            input_mode: InputMode::Normal,
+            input_stream: vec![],
         }
     }
 }
@@ -92,6 +120,12 @@ impl AppState {
                 self.selected_tab_idx = Some(0);
             }
         }
+    }
+    fn switch_mode_to_normal(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+    fn switch_mode_to_edit(&mut self) {
+        self.input_mode = InputMode::Edit;
     }
 }
 
@@ -133,30 +167,90 @@ fn main() -> Result<(), io::Error> {
     ]);
     loop {
         let input_event = rx.recv().unwrap();
-        match input_event {
-            InputEvent::Input(key) => match key {
-                KeyEvent {
-                    code: KeyCode::Char('q'),
-                    modifiers: KeyModifiers::CONTROL,
-                } => break,
-                KeyEvent {
-                    code: KeyCode::Char('h'),
-                    modifiers: KeyModifiers::NONE,
-                } => {
-                    app_state.go_previous_tab();
-                }
-                KeyEvent {
-                    code: KeyCode::Char('l'),
-                    modifiers: KeyModifiers::NONE,
-                } => {
-                    app_state.go_next_tab();
-                }
-                _ => {}
+        match app_state.input_mode {
+            InputMode::Normal => match input_event {
+                InputEvent::Input(key) => match key {
+                    KeyEvent {
+                        code: KeyCode::Char('q'),
+                        modifiers: KeyModifiers::CONTROL,
+                    } => break,
+                    KeyEvent {
+                        code: KeyCode::Char('h'),
+                        modifiers: KeyModifiers::NONE,
+                    } => {
+                        app_state.go_previous_tab();
+                    }
+                    KeyEvent {
+                        code: KeyCode::Char('l'),
+                        modifiers: KeyModifiers::NONE,
+                    } => {
+                        app_state.go_next_tab();
+                    }
+                    KeyEvent {
+                        code: KeyCode::Char('j'),
+                        modifiers: KeyModifiers::NONE,
+                    } => match app_state.selected_tab_idx {
+                        Some(idx) => match idx {
+                            0 => {}
+                            1 => {
+                                source_tab_state.select_next();
+                            }
+                            _ => {}
+                        },
+                        None => {}
+                    },
+                    KeyEvent {
+                        code: KeyCode::Char('k'),
+                        modifiers: KeyModifiers::NONE,
+                    } => match app_state.selected_tab_idx {
+                        Some(idx) => match idx {
+                            0 => {}
+                            1 => {
+                                source_tab_state.select_previous();
+                            }
+                            _ => {}
+                        },
+                        None => {}
+                    },
+                    KeyEvent {
+                        code: KeyCode::Char('a'),
+                        modifiers: KeyModifiers::NONE,
+                    } => match app_state.selected_tab_idx {
+                        Some(idx) => match idx {
+                            0 => {}
+                            1 => {
+                                app_state.switch_mode_to_edit();
+                            }
+                            _ => {}
+                        },
+                        None => {}
+                    },
+                    _ => {}
+                },
+                InputEvent::Tick => {}
             },
-            InputEvent::Tick => {}
+            InputMode::Edit => match input_event {
+                InputEvent::Input(key) => match key {
+                    KeyEvent {
+                        code: KeyCode::Enter,
+                        modifiers: KeyModifiers::NONE,
+                    } => {
+                        // todo: handle input stream before clear
+                        app_state.input_stream.clear();
+                        app_state.switch_mode_to_normal();
+                    }
+                    KeyEvent {
+                        code: KeyCode::Char(c),
+                        modifiers: KeyModifiers::NONE,
+                    } => {
+                        app_state.input_stream.push(c.to_string());
+                    }
+                    _ => {}
+                },
+                InputEvent::Tick => {}
+            },
         }
 
-        //todo: enable move between boards
         terminal.draw(|f| {
             let boards = Layout::default()
                 .direction(Direction::Vertical)
@@ -171,12 +265,7 @@ fn main() -> Result<(), io::Error> {
 
             let tabs_block = Block::default().borders(Borders::ALL).title("Menu");
             f.render_widget(tabs_block, tabs_board);
-            let titles: Vec<Spans> = app_state
-                .cloned_tab_titles()
-                .iter()
-                .cloned()
-                .map(Spans::from)
-                .collect();
+            let titles: Vec<Spans> = tab_titles.iter().cloned().map(Spans::from).collect();
             let tabs_content = Tabs::new(titles)
                 .style(Style::default().fg(Color::White))
                 .highlight_style(Style::default().fg(Color::Yellow))
@@ -219,7 +308,9 @@ fn main() -> Result<(), io::Error> {
                         .iter()
                         .map(|s| ListItem::new(s.clone()).style(Style::default().fg(Color::White)))
                         .collect();
-                    let main_content = List::new(list_items).block(main_block).highlight_style(Style::default().fg(Color::Yellow));
+                    let main_content = List::new(list_items)
+                        .block(main_block)
+                        .highlight_style(Style::default().fg(Color::Yellow));
                     f.render_stateful_widget(
                         main_content,
                         main_board,
@@ -236,6 +327,48 @@ fn main() -> Result<(), io::Error> {
                         .alignment(Alignment::Center)
                         .wrap(Wrap { trim: true });
                     f.render_widget(helper_content, helper_board);
+
+                    //pop up board
+                    let pop_up_board = Rect::new(
+                        main_board.width / 2 - main_board.width / 8,
+                        main_board.height / 4,
+                        main_board.width / 4,
+                        main_board.height / 2,
+                    );
+                    let pop_up_block = Block::default()
+                        .borders(Borders::ALL)
+                        .style(Style::default().fg(Color::Yellow));
+                    f.render_widget(pop_up_block, pop_up_board);
+
+                    let pop_up_board = Layout::default()
+                        .constraints(
+                            [Constraint::Percentage(5), Constraint::Percentage(95)].as_ref(),
+                        )
+                        .split(pop_up_board);
+                    let pop_up_title_board = pop_up_board[0];
+                    let pop_up_content_board = Layout::default()
+                        .constraints([Constraint::Percentage(100)])
+                        .margin(2)
+                        .split(pop_up_board[1])[0];
+
+                    let pop_up_title = Paragraph::new(Spans::from(vec![Span::styled(
+                        "Absolute Path:",
+                        Style::default().fg(Color::Yellow),
+                    )]))
+                    .alignment(Alignment::Center)
+                    .wrap(Wrap { trim: true });
+                    f.render_widget(pop_up_title, pop_up_title_board);
+
+                    let pop_up_input = Paragraph::new(Spans::from(vec![Span::styled(
+                        app_state
+                            .input_stream
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect::<String>(),
+                        Style::default().fg(Color::White),
+                    )]))
+                    .wrap(Wrap { trim: true });
+                    f.render_widget(pop_up_input, pop_up_content_board);
                 }
                 //Settings
                 2 => {
