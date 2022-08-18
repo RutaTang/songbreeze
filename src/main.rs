@@ -61,6 +61,16 @@ impl SourceTabState {
             self.sources_list_state.select(Some(self.sources.len() - 1));
         }
     }
+    fn push_source(&mut self, source: String) {
+        self.sources.push(source);
+    }
+    fn delete_current_selected_item(&mut self) {
+        let current_idx = self.sources_list_state.selected().unwrap();
+        if current_idx >= self.sources.len() {
+            return;
+        }
+        self.sources.remove(current_idx);
+    }
 }
 
 enum InputMode {
@@ -220,6 +230,20 @@ fn main() -> Result<(), io::Error> {
                             0 => {}
                             1 => {
                                 app_state.switch_mode_to_edit();
+                                terminal.show_cursor()?;
+                            }
+                            _ => {}
+                        },
+                        None => {}
+                    },
+                    KeyEvent {
+                        code: KeyCode::Char('d'),
+                        modifiers: KeyModifiers::NONE,
+                    } => match app_state.selected_tab_idx {
+                        Some(idx) => match idx {
+                            0 => {}
+                            1 => {
+                                source_tab_state.delete_current_selected_item();
                             }
                             _ => {}
                         },
@@ -236,10 +260,34 @@ fn main() -> Result<(), io::Error> {
                         modifiers: KeyModifiers::NONE,
                     } => {
                         // todo: handle input stream before clear
-                        // todo: hide/show pop up
                         // todo: show cursor, and support move cursor and delete items
+                        match app_state.selected_tab_idx {
+                            Some(idx) => match idx {
+                                0 => {}
+                                1 => {
+                                    source_tab_state.push_source(
+                                        app_state
+                                            .input_stream
+                                            .iter()
+                                            .map(|s| s.to_string())
+                                            .collect::<String>(),
+                                    );
+                                }
+                                _ => {}
+                            },
+                            None => {}
+                        }
                         app_state.input_stream.clear();
                         app_state.switch_mode_to_normal();
+                        terminal.hide_cursor()?;
+                    }
+                    KeyEvent {
+                        code: KeyCode::Esc,
+                        modifiers: KeyModifiers::NONE,
+                    } => {
+                        app_state.input_stream.clear();
+                        app_state.switch_mode_to_normal();
+                        terminal.hide_cursor()?;
                     }
                     KeyEvent {
                         code: KeyCode::Char(c),
@@ -331,46 +379,61 @@ fn main() -> Result<(), io::Error> {
                     f.render_widget(helper_content, helper_board);
 
                     //pop up board
-                    let pop_up_board = Rect::new(
-                        main_board.width / 2 - main_board.width / 8,
-                        main_board.height / 4,
-                        main_board.width / 4,
-                        main_board.height / 2,
-                    );
-                    let pop_up_block = Block::default()
-                        .borders(Borders::ALL)
-                        .style(Style::default().fg(Color::Yellow));
-                    f.render_widget(pop_up_block, pop_up_board);
+                    if let InputMode::Edit = app_state.input_mode {
+                        let pop_up_board = Rect::new(
+                            main_board.width / 2 - main_board.width / 3,
+                            main_board.height / 2,
+                            main_board.width * 2 / 3,
+                            main_board.height / 4,
+                        );
+                        let pop_up_block = Block::default()
+                            .borders(Borders::ALL)
+                            .style(Style::default().fg(Color::Yellow));
+                        f.render_widget(pop_up_block, pop_up_board);
 
-                    let pop_up_board = Layout::default()
-                        .constraints(
-                            [Constraint::Percentage(5), Constraint::Percentage(95)].as_ref(),
-                        )
-                        .split(pop_up_board);
-                    let pop_up_title_board = pop_up_board[0];
-                    let pop_up_content_board = Layout::default()
-                        .constraints([Constraint::Percentage(100)])
-                        .margin(2)
-                        .split(pop_up_board[1])[0];
+                        let pop_up_board = Layout::default()
+                            .constraints(
+                                [Constraint::Percentage(10), Constraint::Percentage(95)].as_ref(),
+                            )
+                            .split(pop_up_board);
+                        let pop_up_title_board = pop_up_board[0];
+                        let pop_up_content_board = Layout::default()
+                            .constraints([Constraint::Percentage(100)])
+                            .margin(2)
+                            .split(pop_up_board[1])[0];
 
-                    let pop_up_title = Paragraph::new(Spans::from(vec![Span::styled(
-                        "Absolute Path:",
-                        Style::default().fg(Color::Yellow),
-                    )]))
-                    .alignment(Alignment::Center)
-                    .wrap(Wrap { trim: true });
-                    f.render_widget(pop_up_title, pop_up_title_board);
+                        let pop_up_title = Paragraph::new(Spans::from(vec![Span::styled(
+                            "Absolute Path:",
+                            Style::default().fg(Color::Yellow),
+                        )]))
+                        .alignment(Alignment::Center);
+                        f.render_widget(pop_up_title, pop_up_title_board);
 
-                    let pop_up_input = Paragraph::new(Spans::from(vec![Span::styled(
-                        app_state
-                            .input_stream
-                            .iter()
-                            .map(|s| s.to_string())
-                            .collect::<String>(),
-                        Style::default().fg(Color::White),
-                    )]))
-                    .wrap(Wrap { trim: true });
-                    f.render_widget(pop_up_input, pop_up_content_board);
+                        let pop_up_input = Paragraph::new(Spans::from(vec![Span::styled(
+                            app_state
+                                .input_stream
+                                .iter()
+                                .map(|s| s.to_string())
+                                .collect::<String>(),
+                            Style::default().fg(Color::White),
+                        )]))
+                        .wrap(Wrap { trim: true });
+                        let input_stream_len = app_state.input_stream.len() as u16;
+                        let scroll_offset_y = if input_stream_len / pop_up_content_board.width > 3 {
+                            input_stream_len / pop_up_content_board.width - 3
+                        } else {
+                            0
+                        };
+                        let pop_up_input = pop_up_input.scroll((scroll_offset_y, 0));
+                        f.set_cursor(
+                            pop_up_content_board.left()
+                                + input_stream_len % pop_up_content_board.width,
+                            pop_up_content_board.top()
+                                + input_stream_len / pop_up_content_board.width
+                                - scroll_offset_y,
+                        );
+                        f.render_widget(pop_up_input, pop_up_content_board);
+                    }
                 }
                 //Settings
                 2 => {
