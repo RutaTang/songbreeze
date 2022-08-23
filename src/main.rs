@@ -1,9 +1,18 @@
-use std::{io, sync::mpsc, thread, time::Duration, usize};
+use std::{
+    env,
+    fs::{self, File},
+    io::{self, Write},
+    path::{Path, PathBuf},
+    sync::mpsc,
+    thread,
+    time::Duration,
+    usize,
+};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
-    terminal::{enable_raw_mode, EnterAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen},
 };
 use tui::{
     backend::CrosstermBackend,
@@ -139,7 +148,70 @@ impl AppState {
     }
 }
 
+//todo: read and init source path list from file
+struct Configuration {
+    folder_path: PathBuf,
+    settting_file_path: PathBuf,
+    source_file_path: PathBuf,
+}
+impl Configuration {
+    fn new() -> Self {
+        let mut configure = Self {
+            folder_path: PathBuf::new(),
+            settting_file_path: PathBuf::new(),
+            source_file_path: PathBuf::new(),
+        };
+        configure.folder_path = PathBuf::from(env::var("HOME").unwrap()).join(".songbreeze");
+        configure.settting_file_path = configure.folder_path.join("setting.json");
+        configure.source_file_path = configure.folder_path.join("source.json");
+
+        // helper function for creating folder or file while asking user
+        let create_ff_while_asking = |path: &Path, check_for_file: bool| {
+            if !path.exists() {
+                let mut input = String::new();
+                println!(
+                    "Can not find {}, do you want to init it? (y/n)",
+                    path.to_str().unwrap()
+                );
+                match io::stdin().read_line(&mut input) {
+                    Ok(_) => {
+                        if input.trim().to_lowercase() == "y" {
+                            if check_for_file {
+                                File::create(path).unwrap();
+                            } else {
+                                fs::create_dir(path).unwrap();
+                            }
+                        } else {
+                            println!("please init it first");
+                            std::process::exit(0);
+                        }
+                    }
+                    Err(e) => println!("failed to read input: {}", e),
+                };
+            } else {
+            }
+        };
+
+        //check folder exists
+        let folder_path = Path::new(&configure.folder_path);
+        create_ff_while_asking(folder_path, false);
+
+        //check setting file exists
+        let settings_file_path = Path::new(&configure.settting_file_path);
+        create_ff_while_asking(settings_file_path, true);
+
+        //check source file exists
+        let source_file_path = Path::new(&configure.source_file_path);
+        create_ff_while_asking(source_file_path, true);
+
+        configure
+    }
+}
+
 fn main() -> Result<(), io::Error> {
+    //init or load configuration
+    let mut configuration = Configuration::new();
+    //main
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -260,7 +332,6 @@ fn main() -> Result<(), io::Error> {
                         modifiers: KeyModifiers::NONE,
                     } => {
                         // todo: handle input stream before clear
-                        // todo: show cursor, and support move cursor and delete items
                         match app_state.selected_tab_idx {
                             Some(idx) => match idx {
                                 0 => {}
@@ -322,7 +393,7 @@ fn main() -> Result<(), io::Error> {
                 .select(selected_tab_idx)
                 .divider(DOT);
             let tabs_content_board = Layout::default()
-                .constraints([Constraint::Percentage(100)])
+                .constraints([Constraint::Percentage(10)])
                 .horizontal_margin(5)
                 .split(tabs_board)[0];
             let tabs_content_board = Rect::new(
@@ -444,5 +515,6 @@ fn main() -> Result<(), io::Error> {
             }
         })?;
     }
+    disable_raw_mode()?;
     Ok(())
 }
