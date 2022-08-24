@@ -33,10 +33,10 @@ enum InputEvent<I> {
 
 // source database
 #[derive(Serialize, Deserialize)]
-struct SourceDB {
+struct Source {
     sources: Vec<String>,
 }
-impl SourceDB {
+impl Source {
     fn new_empty() -> Self {
         Self { sources: vec![] }
     }
@@ -165,7 +165,7 @@ struct Configuration {
     folder_path: PathBuf,
     settting_file_path: PathBuf,
     source_file_path: PathBuf,
-    source_db: SourceDB,
+    source_db: Source,
 }
 impl Configuration {
     fn new() -> Self {
@@ -173,7 +173,7 @@ impl Configuration {
             folder_path: PathBuf::new(),
             settting_file_path: PathBuf::new(),
             source_file_path: PathBuf::new(),
-            source_db: SourceDB::new_empty(),
+            source_db: Source::new_empty(),
         };
         configure.folder_path = PathBuf::from(env::var("HOME").unwrap()).join(".songbreeze");
         configure.settting_file_path = configure.folder_path.join("setting.json");
@@ -217,7 +217,7 @@ impl Configuration {
         let source_file_path = Path::new(&configure.source_file_path);
         create_ff_while_asking(source_file_path, true);
         let source_file_content = fs::read_to_string(source_file_path).unwrap();
-        let source_db: SourceDB =
+        let source_db: Source =
             serde_json::from_str(&source_file_content).unwrap_or(configure.source_db);
         configure.source_db = source_db;
         configure
