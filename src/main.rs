@@ -1,3 +1,6 @@
+//todo: refactor
+//1. architecture: appstate owns three states and a configuration
+//2. sourcetabstate has source structure
 use serde::{Deserialize, Serialize};
 use std::{
     env,
