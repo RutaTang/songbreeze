@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::{
     env,
     fs::{self, File},
@@ -28,6 +29,17 @@ use tui::{
 enum InputEvent<I> {
     Input(I),
     Tick,
+}
+
+// source database
+#[derive(Serialize, Deserialize)]
+struct SourceDB {
+    sources: Vec<String>,
+}
+impl SourceDB {
+    fn new_empty() -> Self {
+        Self { sources: vec![] }
+    }
 }
 
 // settings tab state
@@ -148,11 +160,12 @@ impl AppState {
     }
 }
 
-//todo: read and init source path list from file
+//todo: add and delete source
 struct Configuration {
     folder_path: PathBuf,
     settting_file_path: PathBuf,
     source_file_path: PathBuf,
+    source_db: SourceDB,
 }
 impl Configuration {
     fn new() -> Self {
@@ -160,6 +173,7 @@ impl Configuration {
             folder_path: PathBuf::new(),
             settting_file_path: PathBuf::new(),
             source_file_path: PathBuf::new(),
+            source_db: SourceDB::new_empty(),
         };
         configure.folder_path = PathBuf::from(env::var("HOME").unwrap()).join(".songbreeze");
         configure.settting_file_path = configure.folder_path.join("setting.json");
@@ -188,7 +202,6 @@ impl Configuration {
                     }
                     Err(e) => println!("failed to read input: {}", e),
                 };
-            } else {
             }
         };
 
@@ -196,14 +209,17 @@ impl Configuration {
         let folder_path = Path::new(&configure.folder_path);
         create_ff_while_asking(folder_path, false);
 
-        //check setting file exists
+        //check setting file exists and load it
         let settings_file_path = Path::new(&configure.settting_file_path);
         create_ff_while_asking(settings_file_path, true);
 
         //check source file exists
         let source_file_path = Path::new(&configure.source_file_path);
         create_ff_while_asking(source_file_path, true);
-
+        let source_file_content = fs::read_to_string(source_file_path).unwrap();
+        let source_db: SourceDB =
+            serde_json::from_str(&source_file_content).unwrap_or(configure.source_db);
+        configure.source_db = source_db;
         configure
     }
 }
@@ -242,11 +258,7 @@ fn main() -> Result<(), io::Error> {
         "Settings".to_string(),
     ]);
     let mut source_tab_state = SourceTabState::new();
-    source_tab_state.set_sources(vec![
-        "~/music".to_string(),
-        "~/google_drive/".to_string(),
-        "~/dropbox".to_string(),
-    ]);
+    source_tab_state.set_sources(configuration.source_db.sources);
     loop {
         let input_event = rx.recv().unwrap();
         match app_state.input_mode {
