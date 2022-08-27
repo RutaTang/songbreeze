@@ -1,4 +1,7 @@
 //todo: add home tabstate and scan audio files from sources folder
+//1. left: playlist (with default)
+//2. middle: songs list
+//3. right: song info
 use serde::{Deserialize, Serialize};
 use std::{
     cell::Ref,
