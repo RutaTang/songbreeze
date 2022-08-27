@@ -22,9 +22,9 @@ use tui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    symbols::DOT,
+    symbols::{self, DOT},
     text::{Span, Spans, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, LineGauge, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Terminal,
 };
 
@@ -417,10 +417,18 @@ fn main() -> Result<(), io::Error> {
         terminal.draw(|f| {
             let boards = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(10), Constraint::Percentage(90)].as_ref())
+                .constraints(
+                    [
+                        Constraint::Percentage(10),
+                        Constraint::Percentage(80),
+                        Constraint::Percentage(10),
+                    ]
+                    .as_ref(),
+                )
                 .split(f.size());
             let tabs_board = boards[0];
             let main_board = boards[1];
+            let player_board = boards[2];
 
             // draw tabs block and tabs content
             let tab_titles = app_state.cloned_tab_titles();
@@ -555,6 +563,39 @@ fn main() -> Result<(), io::Error> {
                 }
                 _ => {}
             }
+
+            // === draw player board ===
+            // draw player block
+            let player_block = Block::default().borders(Borders::ALL);
+            f.render_widget(player_block, player_board);
+            // split player board to progress & content board
+            let player_board = Layout::default()
+                .direction(Direction::Vertical)
+                .vertical_margin(1)
+                .horizontal_margin(3)
+                .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(player_board);
+            let player_progress_board = player_board[0];
+            let player_content_board = player_board[1];
+            //draw progress
+            let player_progress = LineGauge::default()
+                .gauge_style(
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .line_set(symbols::line::THICK)
+                .ratio(0.4);
+            f.render_widget(player_progress, player_progress_board);
+            let player_content = Paragraph::new(Spans::from(vec![
+                Span::styled("(p) Play", Style::default().fg(Color::White)),
+                Span::raw(" ".repeat(5)),
+                Span::styled("(<) Previous", Style::default().fg(Color::White)),
+                Span::raw(" ".repeat(5)),
+                Span::styled("(>) Next", Style::default().fg(Color::White)),
+            ]));
+            f.render_widget(player_content, player_content_board);
         })?;
     }
     disable_raw_mode()?;
