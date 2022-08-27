@@ -1,4 +1,4 @@
-//todo: add a global player
+//todo: add home tabstate and scan audio files from sources folder
 use serde::{Deserialize, Serialize};
 use std::{
     cell::Ref,
@@ -581,7 +581,7 @@ fn main() -> Result<(), io::Error> {
             let player_progress = LineGauge::default()
                 .gauge_style(
                     Style::default()
-                        .fg(Color::White)
+                        .fg(Color::Blue)
                         .bg(Color::Black)
                         .add_modifier(Modifier::BOLD),
                 )
