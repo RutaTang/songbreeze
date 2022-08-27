@@ -1,3 +1,4 @@
+//todo: add a global player
 use serde::{Deserialize, Serialize};
 use std::{
     cell::Ref,
