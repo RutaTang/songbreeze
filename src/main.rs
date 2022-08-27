@@ -1,12 +1,11 @@
-//todo: refactor
-//1. architecture: appstate owns three states and a configuration
-//2. sourcetabstate has source structure
 use serde::{Deserialize, Serialize};
 use std::{
+    cell::Ref,
     env,
     fs::{self, File},
     io::{self, Write},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::mpsc,
     thread,
     time::Duration,
@@ -34,7 +33,7 @@ enum InputEvent<I> {
     Tick,
 }
 
-// source database
+// source json
 #[derive(Serialize, Deserialize)]
 struct Source {
     sources: Vec<String>,
@@ -50,50 +49,80 @@ struct SettingsState {}
 
 // source tab state
 struct SourceTabState {
-    sources: Vec<String>,
+    source_db: Source,
     sources_list_state: ListState,
+    configuration: Rc<Configuration>,
 }
 impl SourceTabState {
-    fn new() -> Self {
+    fn new(configuration: Rc<Configuration>) -> Self {
         Self {
-            sources: vec![],
+            source_db: Source::new_empty(),
             sources_list_state: ListState::default(),
+            configuration,
         }
     }
 }
 impl SourceTabState {
-    fn set_sources(&mut self, sources: Vec<String>) {
-        self.sources = sources;
+    fn load_sources(&mut self) {
+        let raw_content = fs::read_to_string(&self.configuration.source_file_path).unwrap();
+        let source: Source = serde_json::from_str(&raw_content).unwrap();
+        self.source_db = source;
         self.sources_list_state.select(Some(0));
     }
     fn cloned_sources(&self) -> Vec<String> {
-        self.sources.clone()
+        self.source_db.sources.clone()
     }
     fn select_next(&mut self) {
+        if self.source_db.sources.is_empty() {
+            return;
+        }
         let current_idx = self.sources_list_state.selected().unwrap();
-        if current_idx + 1 < self.sources.len() {
+        if current_idx + 1 < self.source_db.sources.len() {
             self.sources_list_state.select(Some(current_idx + 1));
         } else {
             self.sources_list_state.select(Some(0));
         }
     }
     fn select_previous(&mut self) {
+        if self.source_db.sources.is_empty() {
+            return;
+        }
         let current_idx = self.sources_list_state.selected().unwrap();
         if current_idx > 0 {
             self.sources_list_state.select(Some(current_idx - 1));
         } else {
-            self.sources_list_state.select(Some(self.sources.len() - 1));
+            self.sources_list_state
+                .select(Some(self.source_db.sources.len() - 1));
         }
     }
-    fn push_source(&mut self, source: String) {
-        self.sources.push(source);
-    }
-    fn delete_current_selected_item(&mut self) {
-        let current_idx = self.sources_list_state.selected().unwrap();
-        if current_idx >= self.sources.len() {
+    fn add_source(&mut self, source: String) {
+        if source.is_empty() {
             return;
         }
-        self.sources.remove(current_idx);
+        self.source_db.sources.push(source);
+        fs::write(
+            &self.configuration.source_file_path,
+            serde_json::to_string_pretty(&self.source_db).unwrap(),
+        )
+        .unwrap();
+    }
+    fn delete_current_selected_source(&mut self) {
+        let current_idx = self.sources_list_state.selected().unwrap();
+        if current_idx >= self.source_db.sources.len() {
+            return;
+        }
+        self.source_db.sources.remove(current_idx);
+        fs::write(
+            &self.configuration.source_file_path,
+            serde_json::to_string_pretty(&self.source_db).unwrap(),
+        )
+        .unwrap();
+        if !self.source_db.sources.is_empty() {
+            self.sources_list_state
+                .select(Some(self.source_db.sources.len() - 1));
+        } else {
+            self.sources_list_state.select(None);
+        }
     }
 }
 
@@ -102,23 +131,25 @@ enum InputMode {
     Edit,
 }
 // app global state
-struct AppState {
+struct GlobalState {
     tab_titles: Vec<String>,
     selected_tab_idx: Option<usize>,
     input_mode: InputMode,
     input_stream: Vec<String>,
+    configuration: Rc<Configuration>,
 }
-impl AppState {
-    fn new() -> AppState {
-        AppState {
+impl GlobalState {
+    fn new(configuration: Rc<Configuration>) -> GlobalState {
+        GlobalState {
             tab_titles: vec![],
             selected_tab_idx: None,
             input_mode: InputMode::Normal,
             input_stream: vec![],
+            configuration,
         }
     }
 }
-impl AppState {
+impl GlobalState {
     fn set_tab_titles(&mut self, tab_titles: Vec<String>) {
         assert!(!tab_titles.is_empty());
         self.tab_titles = tab_titles;
@@ -168,7 +199,6 @@ struct Configuration {
     folder_path: PathBuf,
     settting_file_path: PathBuf,
     source_file_path: PathBuf,
-    source_db: Source,
 }
 impl Configuration {
     fn new() -> Self {
@@ -176,7 +206,6 @@ impl Configuration {
             folder_path: PathBuf::new(),
             settting_file_path: PathBuf::new(),
             source_file_path: PathBuf::new(),
-            source_db: Source::new_empty(),
         };
         configure.folder_path = PathBuf::from(env::var("HOME").unwrap()).join(".songbreeze");
         configure.settting_file_path = configure.folder_path.join("setting.json");
@@ -219,17 +248,22 @@ impl Configuration {
         //check source file exists
         let source_file_path = Path::new(&configure.source_file_path);
         create_ff_while_asking(source_file_path, true);
-        let source_file_content = fs::read_to_string(source_file_path).unwrap();
-        let source_db: Source =
-            serde_json::from_str(&source_file_content).unwrap_or(configure.source_db);
-        configure.source_db = source_db;
         configure
     }
 }
 
 fn main() -> Result<(), io::Error> {
-    //init or load configuration
-    let mut configuration = Configuration::new();
+    let configuration = Rc::new(Configuration::new());
+    let mut app_state = GlobalState::new(configuration.clone());
+    app_state.set_tab_titles(vec![
+        "Home".to_string(),
+        "Sources".to_string(),
+        "Settings".to_string(),
+    ]);
+    let mut source_tab_state = SourceTabState::new(configuration.clone());
+    source_tab_state.load_sources();
+    //todo: home tab state
+
     //main
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -254,14 +288,6 @@ fn main() -> Result<(), io::Error> {
         }
     });
 
-    let mut app_state = AppState::new();
-    app_state.set_tab_titles(vec![
-        "Home".to_string(),
-        "Sources".to_string(),
-        "Settings".to_string(),
-    ]);
-    let mut source_tab_state = SourceTabState::new();
-    source_tab_state.set_sources(configuration.source_db.sources);
     loop {
         let input_event = rx.recv().unwrap();
         match app_state.input_mode {
@@ -330,7 +356,7 @@ fn main() -> Result<(), io::Error> {
                         Some(idx) => match idx {
                             0 => {}
                             1 => {
-                                source_tab_state.delete_current_selected_item();
+                                source_tab_state.delete_current_selected_source();
                             }
                             _ => {}
                         },
@@ -351,7 +377,7 @@ fn main() -> Result<(), io::Error> {
                             Some(idx) => match idx {
                                 0 => {}
                                 1 => {
-                                    source_tab_state.push_source(
+                                    source_tab_state.add_source(
                                         app_state
                                             .input_stream
                                             .iter()
