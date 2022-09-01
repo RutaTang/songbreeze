@@ -37,19 +37,24 @@ enum InputEvent<I> {
     Tick,
 }
 
-// source json
-#[derive(Serialize, Deserialize)]
-struct Source {
-    sources: Vec<String>,
-}
-impl Source {
-    fn new_empty() -> Self {
-        Self { sources: vec![] }
-    }
+//home tab state
+struct HomeTabState {
+    playlists: Vec<PlayList>,
+    playlists_state: ListState,
 }
 
-// settings tab state
-struct SettingsState {}
+struct PlayList {
+    name: String,
+    songs: Vec<Song>,
+}
+
+struct Song {
+    name: String,
+    path: PathBuf,
+    size: u16,
+    format: String
+}
+
 
 // source tab state
 struct SourceTabState {
@@ -129,6 +134,20 @@ impl SourceTabState {
         }
     }
 }
+
+// source json
+#[derive(Serialize, Deserialize)]
+struct Source {
+    sources: Vec<String>,
+}
+impl Source {
+    fn new_empty() -> Self {
+        Self { sources: vec![] }
+    }
+}
+
+// settings tab state
+struct SettingsState {}
 
 enum InputMode {
     Normal,
@@ -469,6 +488,33 @@ fn main() -> Result<(), io::Error> {
                 0 => {
                     let main_block = Block::default().borders(Borders::ALL).title("Home");
                     f.render_widget(main_block, main_board);
+
+                    let main_board = Layout::default()
+                        .margin(1)
+                        .direction(Direction::Horizontal)
+                        .constraints(vec![
+                            Constraint::Percentage(20),
+                            Constraint::Percentage(60),
+                            Constraint::Percentage(20),
+                        ])
+                        .split(main_board);
+                    let main_left_board = main_board[0];
+                    let main_mid_board = main_board[1];
+                    let main_right_board = main_board[2];
+
+                    //play list
+                    let main_left_block = Block::default().borders(Borders::RIGHT);
+                    let play_list = List::new(vec![ListItem::new("Yes")])
+                        .block(main_left_block)
+                        .highlight_symbol(">> ");
+                    f.render_widget(play_list, main_left_board);
+                    //songs list
+                    let main_mid_block = Block::default().borders(Borders::RIGHT);
+                    f.render_widget(main_mid_block, main_mid_board);
+
+                    //song info
+                    let main_right_block = Block::default().borders(Borders::NONE);
+                    f.render_widget(main_right_block, main_right_board);
                 }
                 //Source
                 1 => {
