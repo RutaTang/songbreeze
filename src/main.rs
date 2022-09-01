@@ -411,6 +411,12 @@ fn main() -> Result<(), io::Error> {
                     } => {
                         app_state.input_stream.push(c.to_string());
                     }
+                    KeyEvent {
+                        code: KeyCode::Backspace,
+                        modifiers: KeyModifiers::NONE,
+                    } => {
+                        app_state.input_stream.pop();
+                    }
                     _ => {}
                 },
                 InputEvent::Tick => {}
