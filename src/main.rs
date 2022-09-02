@@ -3,8 +3,10 @@
 //2. middle: songs list
 //3. right: song info
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::{
     cell::Ref,
+    collections::HashMap,
     env,
     fs::{self, File},
     io::{self, Write},
@@ -39,22 +41,66 @@ enum InputEvent<I> {
 
 //home tab state
 struct HomeTabState {
+    configuration: Rc<Configuration>,
     playlists: Vec<PlayList>,
     playlists_state: ListState,
+}
+impl HomeTabState {
+    fn new(configuration: Rc<Configuration>) -> Self {
+        Self {
+            configuration,
+            playlists: Vec::new(),
+            playlists_state: ListState::default(),
+        }
+    }
+}
+impl HomeTabState {
+    fn load_data(&mut self) {
+        let data = fs::read_to_string(&self.configuration.playlist_file_path).unwrap();
+        let raw_json_data: Value = serde_json::from_str(&data).unwrap_or(json!({
+            "playlist_names":[],
+            "song_paths":[],
+            "playlist_song_relations":{}
+        }));
+
+        //load playlist names
+        let playlist_names = raw_json_data["playlist_names"].as_array();
+        if let Some(playlist_names) = playlist_names {
+            //convert to playlist and init playlists
+            for playlist_name in playlist_names.iter() {
+                let playlist = PlayList {
+                    name: playlist_name.to_string(),
+                    songs: None,
+                };
+                self.playlists.push(playlist);
+            }
+        }
+        //load songs paths
+        let mut song_paths_vec = vec![];
+        let song_paths = raw_json_data["song_paths"].as_array();
+        if let Some(song_paths) = song_paths{
+            for song_path in song_paths.iter(){
+                song_paths_vec.push(song_path.to_string());
+            }
+        }
+        //load playlist/song relations
+        let playlist_song_relations:HashMap<String,String> = serde_json::from_value(raw_json_data["playlist_song_relations"].clone()).unwrap_or(HashMap::new());
+
+        //todo: load songs from song_paths_vec and add to playlists
+    }
 }
 
 struct PlayList {
     name: String,
-    songs: Vec<Song>,
+    songs: Option<Vec<Song>>,
 }
 
 struct Song {
     name: String,
     path: PathBuf,
     size: u16,
-    format: String
+    format: String,
 }
-
 
 // source tab state
 struct SourceTabState {
@@ -222,6 +268,7 @@ struct Configuration {
     folder_path: PathBuf,
     settting_file_path: PathBuf,
     source_file_path: PathBuf,
+    playlist_file_path: PathBuf,
 }
 impl Configuration {
     fn new() -> Self {
@@ -229,10 +276,12 @@ impl Configuration {
             folder_path: PathBuf::new(),
             settting_file_path: PathBuf::new(),
             source_file_path: PathBuf::new(),
+            playlist_file_path: PathBuf::new(),
         };
         configure.folder_path = PathBuf::from(env::var("HOME").unwrap()).join(".songbreeze");
         configure.settting_file_path = configure.folder_path.join("setting.json");
         configure.source_file_path = configure.folder_path.join("source.json");
+        configure.playlist_file_path = configure.folder_path.join("playlist.json");
 
         // helper function for creating folder or file while asking user
         let create_ff_while_asking = |path: &Path, check_for_file: bool| {
@@ -271,21 +320,29 @@ impl Configuration {
         //check source file exists
         let source_file_path = Path::new(&configure.source_file_path);
         create_ff_while_asking(source_file_path, true);
+
+        //check playlist file exists
+        let playlist_file_path = Path::new(&configure.playlist_file_path);
+        create_ff_while_asking(playlist_file_path, true);
         configure
     }
 }
 
 fn main() -> Result<(), io::Error> {
     let configuration = Rc::new(Configuration::new());
+    //app global state
     let mut app_state = GlobalState::new(configuration.clone());
     app_state.set_tab_titles(vec![
         "Home".to_string(),
         "Sources".to_string(),
         "Settings".to_string(),
     ]);
+    //source tab state
     let mut source_tab_state = SourceTabState::new(configuration.clone());
     source_tab_state.load_sources();
-    //todo: home tab state
+    //home tab state
+    let mut home_tab_state = HomeTabState::new(configuration.clone());
+    home_tab_state.load_data();
 
     //main
     enable_raw_mode()?;
