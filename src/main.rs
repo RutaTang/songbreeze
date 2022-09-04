@@ -1,7 +1,7 @@
 //todo: add home tabstate and scan audio files from sources folder
-//1. left: playlist (with default)
 //2. middle: songs list
 //3. right: song info
+//4. show songs list
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -60,33 +60,83 @@ impl HomeTabState {
         let raw_json_data: Value = serde_json::from_str(&data).unwrap_or(json!({
             "playlist_names":[],
             "song_paths":[],
-            "playlist_song_relations":{}
+            "playlist_songpaths_relations":{}
         }));
 
         //load playlist names
         let playlist_names = raw_json_data["playlist_names"].as_array();
-        if let Some(playlist_names) = playlist_names {
-            //convert to playlist and init playlists
-            for playlist_name in playlist_names.iter() {
-                let playlist = PlayList {
-                    name: playlist_name.to_string(),
-                    songs: None,
-                };
-                self.playlists.push(playlist);
-            }
-        }
         //load songs paths
-        let mut song_paths_vec = vec![];
         let song_paths = raw_json_data["song_paths"].as_array();
-        if let Some(song_paths) = song_paths{
-            for song_path in song_paths.iter(){
-                song_paths_vec.push(song_path.to_string());
-            }
-        }
         //load playlist/song relations
-        let playlist_song_relations:HashMap<String,String> = serde_json::from_value(raw_json_data["playlist_song_relations"].clone()).unwrap_or(HashMap::new());
+        let playlist_songpaths_relations: HashMap<String, Vec<String>> =
+            serde_json::from_value(raw_json_data["playlist_songpaths_relations"].clone())
+                .unwrap_or(HashMap::new());
 
-        //todo: load songs from song_paths_vec and add to playlists
+        //load all data to playlists
+        let mut include_default_playlist = false; //check whether include default playlist
+        const DEFAULT_PLAYLIST_NAME: &str = "Default";
+        for (playlist, song_paths) in playlist_songpaths_relations {
+            if playlist == DEFAULT_PLAYLIST_NAME {
+                include_default_playlist = true;
+            }
+            let mut playlist = PlayList {
+                name: playlist,
+                songs: None,
+            };
+            let mut songs = vec![];
+            for song_path in song_paths.iter() {
+                let song = Song::new(PathBuf::from(song_path));
+                if let Some(song) = song {
+                    songs.push(song);
+                }
+            }
+            playlist.songs = Some(songs);
+            self.playlists.push(playlist);
+        }
+        if !include_default_playlist {
+            let playlist = PlayList {
+                name: DEFAULT_PLAYLIST_NAME.to_string(),
+                songs: None,
+            };
+            self.playlists.push(playlist);
+        }
+        //sort playlist in a order but guarantee default playlist is the first
+        self.playlists.sort_by(|a, b| {
+            if a.name == DEFAULT_PLAYLIST_NAME {
+                std::cmp::Ordering::Less
+            } else if b.name == DEFAULT_PLAYLIST_NAME {
+                std::cmp::Ordering::Greater
+            } else {
+                a.name.cmp(&b.name)
+            }
+        });
+        self.playlists_state.select(Some(0));
+    }
+    fn select_next_playlist(&mut self) {
+        let i = match self.playlists_state.selected() {
+            Some(i) => {
+                if i >= self.playlists.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.playlists_state.select(Some(i));
+    }
+    fn select_previous_playlist(&mut self) {
+        let i = match self.playlists_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.playlists.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.playlists_state.select(Some(i));
     }
 }
 
@@ -100,6 +150,23 @@ struct Song {
     path: PathBuf,
     size: u16,
     format: String,
+}
+impl Song {
+    fn new(path: PathBuf) -> Option<Self> {
+        if path.exists() {
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            let size = path.metadata().unwrap().len() as u16;
+            let format = path.extension().unwrap().to_str().unwrap().to_string();
+            Some(Self {
+                name,
+                path,
+                size,
+                format,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 // source tab state
@@ -394,7 +461,10 @@ fn main() -> Result<(), io::Error> {
                         modifiers: KeyModifiers::NONE,
                     } => match app_state.selected_tab_idx {
                         Some(idx) => match idx {
-                            0 => {}
+                            0 => {
+                                home_tab_state.select_next_playlist();
+                            }
+                            //source tab
                             1 => {
                                 source_tab_state.select_next();
                             }
@@ -407,7 +477,9 @@ fn main() -> Result<(), io::Error> {
                         modifiers: KeyModifiers::NONE,
                     } => match app_state.selected_tab_idx {
                         Some(idx) => match idx {
-                            0 => {}
+                            0 => {
+                                home_tab_state.select_previous_playlist();
+                            }
                             1 => {
                                 source_tab_state.select_previous();
                             }
@@ -561,10 +633,19 @@ fn main() -> Result<(), io::Error> {
 
                     //play list
                     let main_left_block = Block::default().borders(Borders::RIGHT);
-                    let play_list = List::new(vec![ListItem::new("Yes")])
+                    let playlists_list_items: Vec<ListItem> = home_tab_state
+                        .playlists
+                        .iter()
+                        .map(|p| ListItem::new(Spans::from(vec![Span::raw(p.name.clone())])))
+                        .collect();
+                    let play_list = List::new(playlists_list_items)
                         .block(main_left_block)
-                        .highlight_symbol(">> ");
-                    f.render_widget(play_list, main_left_board);
+                        .highlight_style(Style::default().fg(Color::Yellow));
+                    f.render_stateful_widget(
+                        play_list,
+                        main_left_board,
+                        &mut home_tab_state.playlists_state,
+                    );
                     //songs list
                     let main_mid_block = Block::default().borders(Borders::RIGHT);
                     f.render_widget(main_mid_block, main_mid_board);
