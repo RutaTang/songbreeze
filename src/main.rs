@@ -1,7 +1,7 @@
 //todo: add home tabstate and scan audio files from sources folder
 //2. middle: songs list
 //3. right: song info
-//4. show songs list
+//5. scan source
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -163,6 +163,9 @@ impl HomeTabState {
     }
     fn back_to_playlists_list(&mut self) {
         self.focus = HomeTabStateFocus::Left;
+        if let Some(idx) = self.playlists_state.selected() {
+            self.songs_list_states[idx].select(None);
+        }
     }
     fn select_next_song(&mut self) {
         if let Some(idx) = self.playlists_state.selected() {
