@@ -39,11 +39,18 @@ enum InputEvent<I> {
     Tick,
 }
 
+enum HomeTabStateFocus {
+    Left,
+    Mid,
+    Right,
+}
 //home tab state
 struct HomeTabState {
     configuration: Rc<Configuration>,
     playlists: Vec<PlayList>,
     playlists_state: ListState,
+    songs_list_states: Vec<ListState>, // each liststate coressponding to each playlist liststate
+    focus: HomeTabStateFocus,
 }
 impl HomeTabState {
     fn new(configuration: Rc<Configuration>) -> Self {
@@ -51,6 +58,8 @@ impl HomeTabState {
             configuration,
             playlists: Vec::new(),
             playlists_state: ListState::default(),
+            songs_list_states: Vec::new(),
+            focus: HomeTabStateFocus::Left,
         }
     }
 }
@@ -81,22 +90,20 @@ impl HomeTabState {
             }
             let mut playlist = PlayList {
                 name: playlist,
-                songs: None,
+                songs: vec![],
             };
-            let mut songs = vec![];
             for song_path in song_paths.iter() {
                 let song = Song::new(PathBuf::from(song_path));
                 if let Some(song) = song {
-                    songs.push(song);
+                    playlist.songs.push(song);
                 }
             }
-            playlist.songs = Some(songs);
             self.playlists.push(playlist);
         }
         if !include_default_playlist {
             let playlist = PlayList {
                 name: DEFAULT_PLAYLIST_NAME.to_string(),
-                songs: None,
+                songs: vec![],
             };
             self.playlists.push(playlist);
         }
@@ -111,6 +118,13 @@ impl HomeTabState {
             }
         });
         self.playlists_state.select(Some(0));
+
+        //init songs_states
+        self.songs_list_states = self
+            .playlists
+            .iter()
+            .map(|_| ListState::default())
+            .collect();
     }
     fn select_next_playlist(&mut self) {
         let i = match self.playlists_state.selected() {
@@ -138,11 +152,55 @@ impl HomeTabState {
         };
         self.playlists_state.select(Some(i));
     }
+    fn enter_current_playlist_songs_list(&mut self) {
+        if let Some(idx) = self.playlists_state.selected() {
+            if !self.playlists[idx].songs.is_empty() {
+                let current_songs_list_state = self.songs_list_states.get_mut(idx).unwrap();
+                self.focus = HomeTabStateFocus::Mid;
+                current_songs_list_state.select(Some(0));
+            }
+        }
+    }
+    fn back_to_playlists_list(&mut self) {
+        self.focus = HomeTabStateFocus::Left;
+    }
+    fn select_next_song(&mut self) {
+        if let Some(idx) = self.playlists_state.selected() {
+            let current_songs_list_state = self.songs_list_states.get_mut(idx).unwrap();
+            let i = match current_songs_list_state.selected() {
+                Some(i) => {
+                    if i >= self.playlists[idx].songs.len() - 1 {
+                        0
+                    } else {
+                        i + 1
+                    }
+                }
+                None => 0,
+            };
+            current_songs_list_state.select(Some(i));
+        }
+    }
+    fn select_previous_song(&mut self) {
+        if let Some(idx) = self.playlists_state.selected() {
+            let current_songs_list_state = self.songs_list_states.get_mut(idx).unwrap();
+            let i = match current_songs_list_state.selected() {
+                Some(i) => {
+                    if i == 0 {
+                        self.playlists[idx].songs.len() - 1
+                    } else {
+                        i - 1
+                    }
+                }
+                None => 0,
+            };
+            current_songs_list_state.select(Some(i));
+        }
+    }
 }
 
 struct PlayList {
     name: String,
-    songs: Option<Vec<Song>>,
+    songs: Vec<Song>,
 }
 
 struct Song {
@@ -410,6 +468,7 @@ fn main() -> Result<(), io::Error> {
     //home tab state
     let mut home_tab_state = HomeTabState::new(configuration.clone());
     home_tab_state.load_data();
+    // thread::sleep(Duration::from_secs(3));
 
     //main
     enable_raw_mode()?;
@@ -457,13 +516,49 @@ fn main() -> Result<(), io::Error> {
                         app_state.go_next_tab();
                     }
                     KeyEvent {
+                        code: KeyCode::Char('i'),
+                        modifiers: KeyModifiers::NONE,
+                    } => match app_state.selected_tab_idx {
+                        Some(idx) => match idx {
+                            0 => match home_tab_state.focus {
+                                HomeTabStateFocus::Left => {
+                                    home_tab_state.enter_current_playlist_songs_list();
+                                }
+                                HomeTabStateFocus::Mid => {}
+                                HomeTabStateFocus::Right => {}
+                            },
+                            _ => {}
+                        },
+                        None => {}
+                    },
+                    KeyEvent {
+                        code: KeyCode::Char('b'),
+                        modifiers: KeyModifiers::NONE,
+                    } => match app_state.selected_tab_idx {
+                        Some(idx) => match idx {
+                            0 => match home_tab_state.focus {
+                                HomeTabStateFocus::Left => {}
+                                HomeTabStateFocus::Mid => home_tab_state.back_to_playlists_list(),
+                                HomeTabStateFocus::Right => {}
+                            },
+                            _ => {}
+                        },
+                        None => {}
+                    },
+                    KeyEvent {
                         code: KeyCode::Char('j'),
                         modifiers: KeyModifiers::NONE,
                     } => match app_state.selected_tab_idx {
                         Some(idx) => match idx {
-                            0 => {
-                                home_tab_state.select_next_playlist();
-                            }
+                            0 => match home_tab_state.focus {
+                                HomeTabStateFocus::Left => {
+                                    home_tab_state.select_next_playlist();
+                                }
+                                HomeTabStateFocus::Mid => {
+                                    home_tab_state.select_next_song();
+                                }
+                                HomeTabStateFocus::Right => {}
+                            },
                             //source tab
                             1 => {
                                 source_tab_state.select_next();
@@ -477,9 +572,15 @@ fn main() -> Result<(), io::Error> {
                         modifiers: KeyModifiers::NONE,
                     } => match app_state.selected_tab_idx {
                         Some(idx) => match idx {
-                            0 => {
-                                home_tab_state.select_previous_playlist();
-                            }
+                            0 => match home_tab_state.focus {
+                                HomeTabStateFocus::Left => {
+                                    home_tab_state.select_previous_playlist();
+                                }
+                                HomeTabStateFocus::Mid => {
+                                    home_tab_state.select_previous_song();
+                                }
+                                HomeTabStateFocus::Right => {}
+                            },
                             1 => {
                                 source_tab_state.select_previous();
                             }
@@ -646,10 +747,24 @@ fn main() -> Result<(), io::Error> {
                         main_left_board,
                         &mut home_tab_state.playlists_state,
                     );
-                    //songs list
+                    //songs list corresponding to the current play list
+                    let current_playlist_idx = home_tab_state.playlists_state.selected().unwrap();
                     let main_mid_block = Block::default().borders(Borders::RIGHT);
-                    f.render_widget(main_mid_block, main_mid_board);
-
+                    let songs = &home_tab_state.playlists[current_playlist_idx].songs;
+                    let songs_list_state =
+                        &mut home_tab_state.songs_list_states[current_playlist_idx];
+                    if !songs.is_empty() {
+                        let song_list_items: Vec<ListItem> = songs
+                            .iter()
+                            .map(|s| ListItem::new(Spans::from(vec![Span::raw(s.name.clone())])))
+                            .collect();
+                        let song_list = List::new(song_list_items)
+                            .block(main_mid_block)
+                            .highlight_style(Style::default().fg(Color::Yellow));
+                        f.render_stateful_widget(song_list, main_mid_board, songs_list_state);
+                    } else {
+                        f.render_widget(main_mid_block, main_mid_board);
+                    }
                     //song info
                     let main_right_block = Block::default().borders(Borders::NONE);
                     f.render_widget(main_right_block, main_right_board);
