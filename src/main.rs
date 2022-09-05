@@ -1,7 +1,6 @@
 //todo: add home tabstate and scan audio files from sources folder
 //2. middle: songs list
 //3. right: song info
-//6. filter only audio format file:like mp3, wav
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -113,14 +112,20 @@ impl HomeTabState {
             let read_dir = fs::read_dir(&source_folder_path);
             if let Ok(read_dir) = read_dir {
                 for dir_entry in read_dir {
-                    let dir_entry = dir_entry.unwrap();
-                    if dir_entry.path().is_file() {
-                        let song = Song::new(dir_entry.path());
-                        if let Some(song) = song {
-                            if !songs_set.contains(&song) {
-                                default_playlist.songs.push(song.clone());
-                                songs_set.insert(song);
+                    let dir_entry_path = dir_entry.unwrap().path();
+                    if dir_entry_path.is_file(){
+                        let extention = dir_entry_path.extension().unwrap_or_default().to_str().unwrap_or_default();
+                        match extention {
+                            "mp3" | "wav" => {
+                                let song = Song::new(dir_entry_path);
+                                if let Some(song) = song {
+                                    if !songs_set.contains(&song) {
+                                        default_playlist.songs.push(song.clone());
+                                        songs_set.insert(song);
+                                    }
+                                }
                             }
+                            _ => {}
                         }
                     }
                 }
