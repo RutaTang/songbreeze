@@ -1,21 +1,23 @@
 //todo: add home tabstate and scan audio files from sources folder
 //2. middle: songs list
 //3. right: song info
-//5. scan source
+//6. filter only audio format file:like mp3, wav
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     cell::Ref,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     fs::{self, File},
     io::{self, Write},
+    os,
     path::{Path, PathBuf},
     rc::Rc,
+    str::FromStr,
     sync::mpsc,
     thread,
     time::Duration,
-    usize,
+    usize, ffi,
 };
 
 use crossterm::{
@@ -64,49 +66,68 @@ impl HomeTabState {
     }
 }
 impl HomeTabState {
-    fn load_data(&mut self) {
+    fn load_data(&mut self, source_folder_paths: Vec<PathBuf>) {
         let data = fs::read_to_string(&self.configuration.playlist_file_path).unwrap();
-        let raw_json_data: Value = serde_json::from_str(&data).unwrap_or(json!({
-            "playlist_names":[],
-            "song_paths":[],
-            "playlist_songpaths_relations":{}
-        }));
+        let raw_json_data: Value = serde_json::from_str(&data).unwrap_or_else(|_| {
+            json!({
+                "playlist_songpaths_relations":{}
+            })
+        });
 
-        //load playlist names
-        let playlist_names = raw_json_data["playlist_names"].as_array();
-        //load songs paths
-        let song_paths = raw_json_data["song_paths"].as_array();
         //load playlist/song relations
         let playlist_songpaths_relations: HashMap<String, Vec<String>> =
             serde_json::from_value(raw_json_data["playlist_songpaths_relations"].clone())
-                .unwrap_or(HashMap::new());
+                .unwrap_or_else(|_| HashMap::new());
 
         //load all data to playlists
-        let mut include_default_playlist = false; //check whether include default playlist
+        let mut songs_set: HashSet<Song> = HashSet::new();
         const DEFAULT_PLAYLIST_NAME: &str = "Default";
-        for (playlist, song_paths) in playlist_songpaths_relations {
-            if playlist == DEFAULT_PLAYLIST_NAME {
-                include_default_playlist = true;
-            }
+        let mut default_playlist = PlayList {
+            name: DEFAULT_PLAYLIST_NAME.to_string(),
+            songs: vec![],
+        };
+        for (playlist_name, song_paths) in playlist_songpaths_relations {
             let mut playlist = PlayList {
-                name: playlist,
+                name: playlist_name.clone(),
                 songs: vec![],
             };
             for song_path in song_paths.iter() {
                 let song = Song::new(PathBuf::from(song_path));
                 if let Some(song) = song {
-                    playlist.songs.push(song);
+                    playlist.songs.push(song.clone());
+                    songs_set.insert(song);
                 }
             }
-            self.playlists.push(playlist);
+            if playlist_name == DEFAULT_PLAYLIST_NAME {
+                default_playlist = playlist;
+            } else {
+                self.playlists.push(playlist);
+            }
         }
-        if !include_default_playlist {
-            let playlist = PlayList {
-                name: DEFAULT_PLAYLIST_NAME.to_string(),
-                songs: vec![],
-            };
-            self.playlists.push(playlist);
+
+        //steps:
+        //1. make a set containing current all current songs
+        //2. scan all files in source folder
+        //3. if the song is not in the set, add the song to default playlist
+        for source_folder_path in source_folder_paths {
+            let read_dir = fs::read_dir(&source_folder_path);
+            if let Ok(read_dir) = read_dir {
+                for dir_entry in read_dir {
+                    let dir_entry = dir_entry.unwrap();
+                    if dir_entry.path().is_file() {
+                        let song = Song::new(dir_entry.path());
+                        if let Some(song) = song {
+                            if !songs_set.contains(&song) {
+                                default_playlist.songs.push(song.clone());
+                                songs_set.insert(song);
+                            }
+                        }
+                    }
+                }
+            }
         }
+        self.playlists.push(default_playlist);
+
         //sort playlist in a order but guarantee default playlist is the first
         self.playlists.sort_by(|a, b| {
             if a.name == DEFAULT_PLAYLIST_NAME {
@@ -119,7 +140,7 @@ impl HomeTabState {
         });
         self.playlists_state.select(Some(0));
 
-        //init songs_states
+        //init songs_states for each playlist
         self.songs_list_states = self
             .playlists
             .iter()
@@ -206,6 +227,7 @@ struct PlayList {
     songs: Vec<Song>,
 }
 
+#[derive(Hash, PartialEq, Eq, Clone)]
 struct Song {
     name: String,
     path: PathBuf,
@@ -215,9 +237,9 @@ struct Song {
 impl Song {
     fn new(path: PathBuf) -> Option<Self> {
         if path.exists() {
-            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            let name = path.file_name().unwrap_or(&ffi::OsString::from("Unknown")).to_str().unwrap().to_string();
             let size = path.metadata().unwrap().len() as u16;
-            let format = path.extension().unwrap().to_str().unwrap().to_string();
+            let format = path.extension().unwrap_or(&ffi::OsString::from("Unknown")).to_str().unwrap().to_string();
             Some(Self {
                 name,
                 path,
@@ -470,7 +492,13 @@ fn main() -> Result<(), io::Error> {
     source_tab_state.load_sources();
     //home tab state
     let mut home_tab_state = HomeTabState::new(configuration.clone());
-    home_tab_state.load_data();
+    let sources_pathbufs = source_tab_state
+        .source_db
+        .sources
+        .iter()
+        .map(|s| PathBuf::from(s))
+        .collect();
+    home_tab_state.load_data(sources_pathbufs);
     // thread::sleep(Duration::from_secs(3));
 
     //main
