@@ -1,6 +1,7 @@
 //todo: add home tabstate and scan audio files from sources folder
 //2. middle: songs list
 //3. right: song info
+//7. show song info
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
