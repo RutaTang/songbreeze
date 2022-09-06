@@ -1,3 +1,4 @@
+use rodio::{source, Decoder, OutputStream, Sink, OutputStreamHandle};
 //todo: add home tabstate and scan audio files from sources folder
 //2. middle: songs list
 //3. right: song info
@@ -7,9 +8,9 @@ use serde_json::{json, Value};
 use std::{
     cell::Ref,
     collections::{HashMap, HashSet},
-    env,
+    env, ffi,
     fs::{self, File},
-    io::{self, Write},
+    io::{self, BufReader, Write},
     os,
     path::{Path, PathBuf},
     rc::Rc,
@@ -17,7 +18,7 @@ use std::{
     sync::mpsc,
     thread,
     time::Duration,
-    usize, ffi,
+    usize,
 };
 
 use crossterm::{
@@ -114,8 +115,12 @@ impl HomeTabState {
             if let Ok(read_dir) = read_dir {
                 for dir_entry in read_dir {
                     let dir_entry_path = dir_entry.unwrap().path();
-                    if dir_entry_path.is_file(){
-                        let extention = dir_entry_path.extension().unwrap_or_default().to_str().unwrap_or_default();
+                    if dir_entry_path.is_file() {
+                        let extention = dir_entry_path
+                            .extension()
+                            .unwrap_or_default()
+                            .to_str()
+                            .unwrap_or_default();
                         match extention {
                             "mp3" | "wav" => {
                                 let song = Song::new(dir_entry_path);
@@ -226,6 +231,14 @@ impl HomeTabState {
             current_songs_list_state.select(Some(i));
         }
     }
+    fn clone_current_selected_song(&mut self) -> Option<Song> {
+        if let Some(playlist_idx) = self.playlists_state.selected() {
+            if let Some(song_idx) = self.songs_list_states[playlist_idx].selected() {
+                return Some(self.playlists[playlist_idx].songs[song_idx].clone());
+            }
+        }
+        None
+    }
 }
 
 struct PlayList {
@@ -243,9 +256,19 @@ struct Song {
 impl Song {
     fn new(path: PathBuf) -> Option<Self> {
         if path.exists() {
-            let name = path.file_name().unwrap_or(&ffi::OsString::from("Unknown")).to_str().unwrap().to_string();
+            let name = path
+                .file_name()
+                .unwrap_or(&ffi::OsString::from("Unknown"))
+                .to_str()
+                .unwrap()
+                .to_string();
             let size = path.metadata().unwrap().len() as u16;
-            let format = path.extension().unwrap_or(&ffi::OsString::from("Unknown")).to_str().unwrap().to_string();
+            let format = path
+                .extension()
+                .unwrap_or(&ffi::OsString::from("Unknown"))
+                .to_str()
+                .unwrap()
+                .to_string();
             Some(Self {
                 name,
                 path,
@@ -351,6 +374,39 @@ impl Source {
 // settings tab state
 struct SettingsState {}
 
+// playback
+struct Playback {
+    current_song: Option<Song>,
+    output_stream_handle: OutputStreamHandle,
+    sink: Sink,
+}
+impl Playback {
+    fn new() -> Self {
+        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+        let sink = Sink::try_new(&stream_handle).unwrap();
+        Self {
+            current_song: None,
+            output_stream_handle: stream_handle,
+            sink,
+        }
+    }
+}
+
+impl Playback {
+    fn play(&mut self, song: Song) {
+        //todo: add use sink to play song
+        let file = BufReader::new(File::open(&song.path).unwrap());
+        let source = Decoder::new(file).unwrap();
+        self.current_song = Some(song);
+    }
+    fn pause(&mut self) {
+        self.sink.pause();
+    }
+    fn stop(&mut self) {
+        self.sink.stop();
+    }
+}
+
 enum InputMode {
     Normal,
     Edit,
@@ -362,6 +418,7 @@ struct GlobalState {
     input_mode: InputMode,
     input_stream: Vec<String>,
     configuration: Rc<Configuration>,
+    playback: Playback,
 }
 impl GlobalState {
     fn new(configuration: Rc<Configuration>) -> GlobalState {
@@ -371,6 +428,7 @@ impl GlobalState {
             input_mode: InputMode::Normal,
             input_stream: vec![],
             configuration,
+            playback: Playback::new(),
         }
     }
 }
@@ -652,6 +710,26 @@ fn main() -> Result<(), io::Error> {
                         },
                         None => {}
                     },
+                    KeyEvent {
+                        code: KeyCode::Char('p'),
+                        modifiers: KeyModifiers::NONE,
+                    } => match app_state.selected_tab_idx {
+                        Some(idx) => match idx {
+                            0 => match home_tab_state.focus {
+                                HomeTabStateFocus::Left => {}
+                                HomeTabStateFocus::Mid => {
+                                    let current_song = home_tab_state.clone_current_selected_song();
+                                    if let Some(current_song) = current_song {
+                                        app_state.playback.play(current_song);
+                                    }
+                                }
+                                HomeTabStateFocus::Right => {}
+                            },
+                            1 => {}
+                            _ => {}
+                        },
+                        None => {}
+                    },
                     _ => {}
                 },
                 InputEvent::Tick => {}
@@ -759,15 +837,11 @@ fn main() -> Result<(), io::Error> {
                     let main_board = Layout::default()
                         .margin(1)
                         .direction(Direction::Horizontal)
-                        .constraints(vec![
-                            Constraint::Percentage(20),
-                            Constraint::Percentage(60),
-                            Constraint::Percentage(20),
-                        ])
+                        .constraints(vec![Constraint::Percentage(20), Constraint::Percentage(80)])
                         .split(main_board);
                     let main_left_board = main_board[0];
                     let main_mid_board = main_board[1];
-                    let main_right_board = main_board[2];
+                    // let main_right_board = main_board[2];
 
                     //play list
                     let main_left_block = Block::default().borders(Borders::RIGHT);
@@ -786,7 +860,7 @@ fn main() -> Result<(), io::Error> {
                     );
                     //songs list corresponding to the current play list
                     let current_playlist_idx = home_tab_state.playlists_state.selected().unwrap();
-                    let main_mid_block = Block::default().borders(Borders::RIGHT);
+                    let main_mid_block = Block::default();
                     let songs = &home_tab_state.playlists[current_playlist_idx].songs;
                     let songs_list_state =
                         &mut home_tab_state.songs_list_states[current_playlist_idx];
@@ -803,8 +877,8 @@ fn main() -> Result<(), io::Error> {
                         f.render_widget(main_mid_block, main_mid_board);
                     }
                     //song info
-                    let main_right_block = Block::default().borders(Borders::NONE);
-                    f.render_widget(main_right_block, main_right_board);
+                    // let main_right_block = Block::default().borders(Borders::NONE);
+                    // f.render_widget(main_right_block, main_right_board);
                 }
                 //Source
                 1 => {
@@ -945,4 +1019,23 @@ fn main() -> Result<(), io::Error> {
     }
     disable_raw_mode()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use rodio::{source::SineWave, Source};
+
+    use super::*;
+
+    #[test]
+    fn play() {
+        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+        let sink = Sink::try_new(&stream_handle).unwrap();
+        let file =
+            BufReader::new(File::open(PathBuf::from("/Users/ruta/Desktop/Soft.mp3")).unwrap());
+        // Decode that sound file into a source
+        let source = Decoder::new(file).unwrap();
+        sink.append(source);
+        sink.sleep_until_end();
+    }
 }
