@@ -1,4 +1,4 @@
-use rodio::{source, Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::{source, Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 //todo: add home tabstate and scan audio files from sources folder
 //2. middle: songs list
 //3. right: song info
@@ -286,14 +286,14 @@ impl Song {
 
 // source tab state
 struct SourceTabState {
-    source_db: Source,
+    source_db: SourceDB,
     sources_list_state: ListState,
     configuration: Rc<Configuration>,
 }
 impl SourceTabState {
     fn new(configuration: Rc<Configuration>) -> Self {
         Self {
-            source_db: Source::new_empty(),
+            source_db: SourceDB::new_empty(),
             sources_list_state: ListState::default(),
             configuration,
         }
@@ -302,7 +302,7 @@ impl SourceTabState {
 impl SourceTabState {
     fn load_sources(&mut self) {
         let raw_content = fs::read_to_string(&self.configuration.source_file_path).unwrap();
-        let source: Source = serde_json::from_str(&raw_content).unwrap();
+        let source: SourceDB = serde_json::from_str(&raw_content).unwrap();
         self.source_db = source;
         self.sources_list_state.select(Some(0));
     }
@@ -365,10 +365,10 @@ impl SourceTabState {
 
 // source json
 #[derive(Serialize, Deserialize)]
-struct Source {
+struct SourceDB {
     sources: Vec<String>,
 }
-impl Source {
+impl SourceDB {
     fn new_empty() -> Self {
         Self { sources: vec![] }
     }
@@ -398,6 +398,8 @@ struct Playback {
     // play_mode: PlayMode,
     songs_queue: Arc<Mutex<VecDeque<Song>>>,
 }
+
+//todo: track duration
 impl Playback {
     fn new() -> Self {
         let (tx, rx) = mpsc::channel();
@@ -414,7 +416,7 @@ impl Playback {
                         let mut songs_queue = songs_queue.lock().unwrap();
                         if let Some(song) = songs_queue.pop_front() {
                             let file = File::open(song.path).unwrap();
-                            let source = rodio::Decoder::new(BufReader::new(file)).unwrap();
+                            let source = Decoder::new(BufReader::new(file)).unwrap();
                             sink.append(source);
                         }
                     }
