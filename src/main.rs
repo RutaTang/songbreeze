@@ -1,4 +1,4 @@
-use rodio::{source, Decoder, OutputStream, Sink, OutputStreamHandle};
+use rodio::{source, Decoder, OutputStream, OutputStreamHandle, Sink};
 //todo: add home tabstate and scan audio files from sources folder
 //2. middle: songs list
 //3. right: song info
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     cell::Ref,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     env, ffi,
     fs::{self, File},
     io::{self, BufReader, Write},
@@ -15,7 +15,10 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     str::FromStr,
-    sync::mpsc,
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Arc, Mutex,
+    },
     thread,
     time::Duration,
     usize,
@@ -374,39 +377,69 @@ impl Source {
 // settings tab state
 struct SettingsState {}
 
+enum PlayMode {
+    SingleLoop,
+    ListLoop,
+    ListRandom,
+    AllListRandom,
+}
 // playback
+// 1. play mode: single loop, list loop, list random, all lists random
+// 2. 'p' to resume/play current or pause
+// 3. 'q' to push current song to the end of the list
+// 4. 's' to stop and clear the queue
+// 5. 'm' to change mode
+// 6. 'N'/'n': previous/next song
+//
+// new a thread to play song, current thread send song to the play thread and after played a song
+// send a single to the current thread to send next song
 struct Playback {
-    current_song: Option<Song>,
-    _output_stream_handle: OutputStreamHandle,
-    _output_stream: OutputStream,
-    sink: Sink,
+    tx: Sender<usize>,
+    // play_mode: PlayMode,
+    songs_queue: Arc<Mutex<VecDeque<Song>>>,
 }
 impl Playback {
     fn new() -> Self {
-        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-        let sink = Sink::try_new(&stream_handle).unwrap();
-        Self {
-            current_song: None,
-            _output_stream_handle: stream_handle,
-            _output_stream: _stream,
-            sink,
-        }
+        let (tx, rx) = mpsc::channel();
+        let songs_queue: Arc<Mutex<VecDeque<Song>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let songs_queue_clone = songs_queue.clone();
+        thread::spawn(move || {
+            let songs_queue = songs_queue_clone;
+            let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+            let sink = Sink::try_new(&stream_handle).unwrap();
+            for order in rx {
+                match order {
+                    0 => {
+                        // play
+                        let mut songs_queue = songs_queue.lock().unwrap();
+                        if let Some(song) = songs_queue.pop_front() {
+                            let file = File::open(song.path).unwrap();
+                            let source = rodio::Decoder::new(BufReader::new(file)).unwrap();
+                            sink.append(source);
+                        }
+                    }
+                    1 => {
+                        // pause
+                        sink.pause();
+                    }
+                    _ => {}
+                }
+            }
+        });
+        Self { tx, songs_queue }
     }
 }
 
 impl Playback {
-    //todo: resume/pause, play a new song
-    fn play(&mut self, song: Song) {
-        let file = BufReader::new(File::open(&song.path).unwrap());
-        let source = Decoder::new(file).unwrap();
-        self.sink.append(source);
-        self.current_song = Some(song);
+    fn play(&mut self) {
+        self.tx.send(0).unwrap();
     }
     fn pause(&mut self) {
-        self.sink.pause();
+        self.tx.send(1).unwrap();
     }
-    fn stop(&mut self) {
-        self.sink.stop();
+    fn stop(&mut self) {}
+    fn inqueue(&mut self, song: Song) {
+        self.songs_queue.lock().unwrap().push_back(song);
     }
 }
 
@@ -719,11 +752,14 @@ fn main() -> Result<(), io::Error> {
                     } => match app_state.selected_tab_idx {
                         Some(idx) => match idx {
                             0 => match home_tab_state.focus {
-                                HomeTabStateFocus::Left => {}
+                                HomeTabStateFocus::Left => {
+                                    app_state.playback.pause();
+                                }
                                 HomeTabStateFocus::Mid => {
                                     let current_song = home_tab_state.clone_current_selected_song();
                                     if let Some(current_song) = current_song {
-                                        app_state.playback.play(current_song);
+                                        app_state.playback.inqueue(current_song);
+                                        app_state.playback.play();
                                     }
                                 }
                                 HomeTabStateFocus::Right => {}
@@ -1026,7 +1062,7 @@ fn main() -> Result<(), io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use rodio::{source::SineWave, Source,Sink, queue::SourcesQueueOutput};
+    use rodio::{queue::SourcesQueueOutput, source::SineWave, Sink, Source};
 
     use super::*;
 
@@ -1039,22 +1075,11 @@ mod tests {
         fn new() -> Self {
             let (_stream, stream_handle) = OutputStream::try_default().unwrap();
             let sink = Sink::try_new(&stream_handle).unwrap();
-            Self { sink,stream_handle,output_stream:_stream }
+            Self {
+                sink,
+                stream_handle,
+                output_stream: _stream,
+            }
         }
-    }
-
-    #[test]
-    fn play() {
-        let mut mock = Mock::new();
-        let file =
-            BufReader::new(File::open(PathBuf::from("/Users/ruta/Desktop/Soft.mp3")).unwrap());
-        // Decode that sound file into a source
-        let source = Decoder::new(file).unwrap();
-        mock.sink.append(source);
-        thread::sleep(Duration::from_secs(10));
-        mock.sink.pause();
-        thread::sleep(Duration::from_secs(3));
-        mock.sink.play();
-        thread::sleep(Duration::from_secs(10));
     }
 }
