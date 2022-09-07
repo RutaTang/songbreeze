@@ -377,7 +377,8 @@ struct SettingsState {}
 // playback
 struct Playback {
     current_song: Option<Song>,
-    output_stream_handle: OutputStreamHandle,
+    _output_stream_handle: OutputStreamHandle,
+    _output_stream: OutputStream,
     sink: Sink,
 }
 impl Playback {
@@ -386,17 +387,19 @@ impl Playback {
         let sink = Sink::try_new(&stream_handle).unwrap();
         Self {
             current_song: None,
-            output_stream_handle: stream_handle,
+            _output_stream_handle: stream_handle,
+            _output_stream: _stream,
             sink,
         }
     }
 }
 
 impl Playback {
+    //todo: resume/pause, play a new song
     fn play(&mut self, song: Song) {
-        //todo: add use sink to play song
         let file = BufReader::new(File::open(&song.path).unwrap());
         let source = Decoder::new(file).unwrap();
+        self.sink.append(source);
         self.current_song = Some(song);
     }
     fn pause(&mut self) {
@@ -1023,19 +1026,35 @@ fn main() -> Result<(), io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use rodio::{source::SineWave, Source};
+    use rodio::{source::SineWave, Source,Sink, queue::SourcesQueueOutput};
 
     use super::*;
 
+    struct Mock {
+        sink: Sink,
+        stream_handle: rodio::OutputStreamHandle,
+        output_stream: rodio::OutputStream,
+    }
+    impl Mock {
+        fn new() -> Self {
+            let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+            let sink = Sink::try_new(&stream_handle).unwrap();
+            Self { sink,stream_handle,output_stream:_stream }
+        }
+    }
+
     #[test]
     fn play() {
-        let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-        let sink = Sink::try_new(&stream_handle).unwrap();
+        let mut mock = Mock::new();
         let file =
             BufReader::new(File::open(PathBuf::from("/Users/ruta/Desktop/Soft.mp3")).unwrap());
         // Decode that sound file into a source
         let source = Decoder::new(file).unwrap();
-        sink.append(source);
-        sink.sleep_until_end();
+        mock.sink.append(source);
+        thread::sleep(Duration::from_secs(10));
+        mock.sink.pause();
+        thread::sleep(Duration::from_secs(3));
+        mock.sink.play();
+        thread::sleep(Duration::from_secs(10));
     }
 }
